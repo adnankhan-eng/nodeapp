@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'nodeapp'           // Local image name
+        IMAGE_NAME = 'nodeapp'
         IMAGE_TAG  = "${IMAGE_NAME}:latest"
     }
 
@@ -18,14 +18,20 @@ pipeline {
         stage('Build Docker Image for Minikube') {
             steps {
                 script {
-                    // Switch Docker to Minikube's environment
-                    sh "eval \$(minikube docker-env)"
+                    // Get Minikube Docker environment variables
+                    def dockerEnv = sh(script: "minikube -p minikube docker-env --shell bash", returnStdout: true).trim()
 
-                    // Build the Docker image inside Minikube's Docker daemon
-                    sh "docker build -t ${IMAGE_TAG} ."
+                    // Build Docker image inside Minikube Docker environment
+                    sh """
+                        ${dockerEnv} 
+                        docker build -t ${IMAGE_TAG} .
+                    """
 
                     echo "✅ Docker image built successfully for Minikube"
-                    sh "docker images | grep ${IMAGE_NAME}"
+                    sh """
+                        ${dockerEnv}
+                        docker images | grep ${IMAGE_NAME}
+                    """
                 }
             }
         }
@@ -33,14 +39,11 @@ pipeline {
         stage('Deploy to Local Kubernetes (Minikube)') {
             steps {
                 script {
-                    // Apply Kubernetes manifests
                     sh "kubectl apply -f k8s-deployment.yaml"
                     sh "kubectl apply -f k8s-service.yaml"
 
-                    // Optional: force rolling update if needed
                     sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record || echo 'Deployment may already be using latest image'"
 
-                    // Wait for rollout to finish
                     sh "kubectl rollout status deployment/node-app-deployment --timeout=180s"
 
                     echo "✅ App deployed successfully to Minikube"
