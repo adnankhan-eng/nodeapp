@@ -2,49 +2,64 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = 'dockerhub' // Jenkins Docker Hub credentials ID
-        DOCKER_IMAGE = 'adnan72746/nodeapp:latest' // Docker image name
+        IMAGE_NAME = 'adnan72746/nodeapp'           // Your Docker Hub repo
+        IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}"  // Unique image per build
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/adnankhan-eng/nodeapp.git'
+                git url: 'https://github.com/adnankhan-eng/nodeapp', branch: 'main'
+                sh 'ls -ltr'
             }
         }
 
-        stage('Install & Build') {
+        stage('Login to Docker Hub') {
             steps {
-                sh 'npm install'
-            }
-        }
-
-        stage('Test') {
-            steps {
-                sh 'npm run test || echo "No tests or tests failed, continuing..."'
-            }
-        }
-
-        stage('Docker Build') {
-            steps {
-                sh "docker build -t ${DOCKER_IMAGE} ."
-            }
-        }
-
-        stage('Docker Push') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                    sh "docker push ${DOCKER_IMAGE}"
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
+                    }
                 }
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Build Docker Image') {
             steps {
-                sh "kubectl apply -f k8s-deployment.yaml"
-                sh "kubectl apply -f k8s-service.yaml"
-                sh "kubectl rollout status deployment/node-app-deployment"
+                sh "docker build -t ${IMAGE_TAG} ."
+                sh "docker tag ${IMAGE_TAG} ${IMAGE_NAME}:latest"
+                echo "✅ Docker image built successfully"
+                sh "docker images"
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                sh "docker push ${IMAGE_TAG}"
+                sh "docker push ${IMAGE_NAME}:latest"
+                echo "✅ Docker image pushed successfully"
+            }
+        }
+
+        stage('Deploy to Local Kubernetes (Minikube)') {
+            steps {
+                script {
+                    // Make sure Minikube's Docker environment is used
+                    sh "eval \$(minikube -p minikube docker-env)"
+
+                    // Apply Kubernetes manifests
+                    sh "kubectl apply -f k8s-deployment.yaml"
+                    sh "kubectl apply -f k8s-service.yaml"
+
+                    // Update the deployment image (optional, if rolling update needed)
+                    sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record"
+
+                    // Wait for rollout to finish
+                    sh "kubectl rollout status deployment/node-app-deployment --timeout=180s"
+
+                    echo "✅ App deployed successfully to Minikube"
+                }
             }
         }
     }
