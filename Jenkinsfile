@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'adnan72746/nodeapp'           // Your Docker Hub repo
-        IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}"  // Unique image per build
+        IMAGE_NAME = 'nodeapp'           // Local image name
+        IMAGE_TAG  = "${IMAGE_NAME}:latest"
     }
 
     stages {
@@ -15,45 +15,30 @@ pipeline {
             }
         }
 
-        stage('Login to Docker Hub') {
+        stage('Build Docker Image for Minikube') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
-                    }
+                    // Switch Docker to Minikube's environment
+                    sh "eval \$(minikube docker-env)"
+
+                    // Build the Docker image inside Minikube's Docker daemon
+                    sh "docker build -t ${IMAGE_TAG} ."
+
+                    echo "✅ Docker image built successfully for Minikube"
+                    sh "docker images | grep ${IMAGE_NAME}"
                 }
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh "docker build -t ${IMAGE_TAG} ."
-                sh "docker tag ${IMAGE_TAG} ${IMAGE_NAME}:latest"
-                echo "✅ Docker image built successfully"
-                sh "docker images"
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                sh "docker push ${IMAGE_TAG}"
-                sh "docker push ${IMAGE_NAME}:latest"
-                echo "✅ Docker image pushed successfully"
             }
         }
 
         stage('Deploy to Local Kubernetes (Minikube)') {
             steps {
                 script {
-                    // Make sure Minikube's Docker environment is used
-                    sh "eval \$(minikube -p minikube docker-env)"
-
                     // Apply Kubernetes manifests
                     sh "kubectl apply -f k8s-deployment.yaml"
                     sh "kubectl apply -f k8s-service.yaml"
 
-                    // Update the deployment image (optional, if rolling update needed)
-                    sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record"
+                    // Optional: force rolling update if needed
+                    sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record || echo 'Deployment may already be using latest image'"
 
                     // Wait for rollout to finish
                     sh "kubectl rollout status deployment/node-app-deployment --timeout=180s"
