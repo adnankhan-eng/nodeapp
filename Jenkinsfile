@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'adnankhan7788/nodeapp'          // Docker Hub repository
+        IMAGE_NAME = 'adnankhan7788/newnode'          // Docker Hub repository
         IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}" // Unique image per build
     }
 
