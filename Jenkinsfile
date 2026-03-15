@@ -2,48 +2,64 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'adnan72746/nodeapp'
-        IMAGE_TAG  = "${IMAGE_NAME}:latest"
+        IMAGE_NAME = 'adnankhan7788/nodeapp'          // Docker Hub repository
+        IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}" // Unique image per build
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
                 git url: 'https://github.com/adnankhan-eng/nodeapp', branch: 'main'
                 sh 'ls -ltr'
             }
         }
 
-        stage('Build Docker Image for Minikube') {
+        stage('Docker Hub Login') {
             steps {
                 script {
-                    // Get Minikube Docker environment variables
-                    def dockerEnv = sh(script: "minikube -p minikube docker-env --shell bash", returnStdout: true).trim()
-
-                    // Build Docker image inside Minikube Docker environment
-                    sh """
-                        ${dockerEnv} 
-                        docker build -t ${IMAGE_TAG} .
-                    """
-
-                    echo "✅ Docker image built successfully for Minikube"
-                    sh """
-                        ${dockerEnv}
-                        docker images | grep ${IMAGE_NAME}
-                    """
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub',    // Jenkins credential ID
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
+                    }
                 }
             }
         }
 
-        stage('Deploy to Local Kubernetes (Minikube)') {
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_TAG} ."
+                sh "docker tag ${IMAGE_TAG} ${IMAGE_NAME}:latest"
+                echo "✅ Docker image built successfully"
+                sh "docker images"
+            }
+        }
+
+        stage('Push Docker Image to Docker Hub') {
+            steps {
+                sh "docker push ${IMAGE_TAG}"
+                sh "docker push ${IMAGE_NAME}:latest"
+                echo "✅ Docker image pushed successfully"
+            }
+        }
+
+        stage('Deploy to Local Minikube') {
             steps {
                 script {
+                    // Load Minikube Docker environment
+                    sh "eval \$(minikube -p minikube docker-env)"
+
+                    // Apply Kubernetes manifests
                     sh "kubectl apply -f k8s-deployment.yaml"
                     sh "kubectl apply -f k8s-service.yaml"
 
-                    sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record || echo 'Deployment may already be using latest image'"
+                    // Update deployment image (rolling update)
+                    sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record"
 
+                    // Wait for rollout to finish
                     sh "kubectl rollout status deployment/node-app-deployment --timeout=180s"
 
                     echo "✅ App deployed successfully to Minikube"
