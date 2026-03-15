@@ -2,27 +2,23 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'adnankhan7788/newnode'          // Docker Hub repository
-        IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}" // Unique image per build
+        IMAGE_NAME = 'adnankhan7788/newnode'           // Your Docker Hub repo
+        IMAGE_TAG  = "${IMAGE_NAME}:${BUILD_NUMBER}"  // Unique image per build
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 git url: 'https://github.com/adnankhan-eng/nodeapp', branch: 'main'
                 sh 'ls -ltr'
             }
         }
 
-        stage('Docker Hub Login') {
+        stage('Login to Docker Hub') {
             steps {
                 script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'dockerhub',    // Jenkins credential ID
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )]) {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                         sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
                     }
                 }
@@ -38,7 +34,7 @@ pipeline {
             }
         }
 
-        stage('Push Docker Image to Docker Hub') {
+        stage('Push Docker Image') {
             steps {
                 sh "docker push ${IMAGE_TAG}"
                 sh "docker push ${IMAGE_NAME}:latest"
@@ -46,17 +42,17 @@ pipeline {
             }
         }
 
-        stage('Deploy to Local Minikube') {
+        stage('Deploy to Local Kubernetes (Minikube)') {
             steps {
                 script {
-                    // Load Minikube Docker environment
+                    // Make sure Minikube's Docker environment is used
                     sh "eval \$(minikube -p minikube docker-env)"
 
                     // Apply Kubernetes manifests
                     sh "kubectl apply -f k8s-deployment.yaml"
                     sh "kubectl apply -f k8s-service.yaml"
 
-                    // Update deployment image (rolling update)
+                    // Update the deployment image (optional, if rolling update needed)
                     sh "kubectl set image deployment/node-app-deployment node-app=${IMAGE_TAG} --record"
 
                     // Wait for rollout to finish
